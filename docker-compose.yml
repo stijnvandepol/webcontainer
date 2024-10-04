@@ -1,15 +1,26 @@
-version: '3'
-services:
-  web-blue:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    ports:
-      - "8081:80"
+version: '3.8'
 
-  web-green:
-    build:
-      context: .
-      dockerfile: Dockerfile
+services:
+  zerodowndeploy-blue: &app
+    container_name: zerodowndeploy-blue
+    image: ghcr.io/jamie-mh/zerodowndeploy:latest
+    restart: always
+    networks:
+      - zerodowndeploy
+
+  zerodowndeploy-green:
+    <<: *app
+    container_name: zerodowndeploy-green
+
+  zerodowndeploy-caddy:
+    container_name: zerodowndeploy-caddy
+    image: ghcr.io/jamie-mh/zerodowndeploy-caddy:latest
+    restart: always
     ports:
-      - "8082:80"
+      - 8080:8080
+    networks:
+      - zerodowndeploy
+
+networks:
+  zerodowndeploy:
+    driver: bridge
