@@ -21,16 +21,16 @@ jobs:
 
       - name: Build blue image
         run: |
-          docker build -t website:blue ./blue
+          docker build -t stijn0vp/blue:latest ./blue
 
       - name: Build green image
         run: |
-          docker build -t website:green ./green
+          docker build -t stijn0vp/green:latest ./green
 
       - name: Push blue image
         run: |
-          docker push website:blue
+          docker push stijn0vp/blue:latest
 
       - name: Push green image
         run: |
-          docker push website:green
+          docker push stijn0vp/green:latest
