@@ -1,36 +1,39 @@
-name: Build and Push Docker images
+name: Deploy to Test and Production
 
 on:
   push:
     branches:
-      - main  # Of een andere branch
+      - main  # Pas dit aan naar jouw werkbranch
 
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check out the code
+      - name: Checkout code
         uses: actions/checkout@v2
 
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v1
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-
-      - name: Build blue image
+      - name: Build Docker images
         run: |
-          docker build -t stijn0vp/blue:latest ./blue
+          docker build -t test ./test
+          docker build -t production ./prod
 
-      - name: Build green image
+      - name: Push to Docker Hub
         run: |
-          docker build -t stijn0vp/green:latest ./green
+          echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+          docker push test
+          docker push production
 
-      - name: Push blue image
+      - name: Deploy to Test
         run: |
-          docker push stijn0vp/blue:latest
+          docker-compose -f docker-compose.yml up -d test
 
-      - name: Push green image
+      - name: Manual Approval for Production
         run: |
-          docker push stijn0vp/green:latest
+          echo "Please verify the test environment and then run the command to switch to production."
+
+      - name: Switch to Production
+        if: github.event.action == 'approve'
+        run: |
+          # Commando om om te schakelen naar de productie-container
+          docker-compose -f docker-compose.yml up -d production
