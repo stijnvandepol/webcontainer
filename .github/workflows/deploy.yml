@@ -59,12 +59,23 @@ jobs:
           docker run -d -p 8082:80 --name green stijn0vp/website:latest
         fi
 
-  update-haproxy:
+  approval:
     runs-on: [self-hosted, haproxy-server]
     needs: build
 
     steps:
-    # Schakel HAProxy naar de juiste container
+    # Stap 7: Handmatige goedkeuring vereisen
+    - name: Await manual approval
+      uses: peter-evans/wait-for-approval@v2
+      with:
+        approval-type: explicit
+
+  update-haproxy:
+    runs-on: [self-hosted, haproxy-server]
+    needs: approval  # Wacht op goedkeuring voordat de job wordt uitgevoerd
+
+    steps:
+    # Stap 8: Schakel HAProxy naar de juiste container
     - name: Update HAProxy config
       run: |
         NEXT_CONTAINER=$(cat next-container.txt)
