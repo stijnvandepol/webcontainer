@@ -58,30 +58,20 @@ jobs:
 
   approval:
     runs-on: [self-hosted, haproxy-server]
-
     needs: build
+    environment: production
 
     steps:
-    # Stap 6: Manual approval
-    - name: Await manual approval
-      uses: peter-evans/wait-for-approval@v2
-      with:
-        approval-type: explicit
-
-    # Stap 7: Schakel HAProxy naar de nieuwe container op poort 80
     - name: Update HAProxy config
       run: |
         BLUE_EXISTS=$(docker ps -a --filter "name=blue" --format "{{.Names}}")
         GREEN_EXISTS=$(docker ps -a --filter "name=green" --format "{{.Names}}")
 
         if [ ! -z "$BLUE_EXISTS" ]; then
-          NEW_BACKEND="server blue 127.0.0.1:8081 check"   # Direct verkeer naar de 'blue' container
+          NEW_BACKEND="server blue 172.16.2.40:8081 check"
         else
-          NEW_BACKEND="server green 127.0.0.1:8082 check"  # Direct verkeer naar de 'green' container
+          NEW_BACKEND="server green 172.16.2.40:8082 check"
         fi
 
-        # Update HAProxy config
         sudo sed -i '/^    server/s/.*/    '$NEW_BACKEND'/' /etc/haproxy/haproxy.cfg
-        
-        # Restart HAProxy to apply changes
         sudo systemctl restart haproxy
