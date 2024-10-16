@@ -1,50 +1,36 @@
-name: CI/CD Pipeline
+name: Build and Deploy to Docker Hub
 
 on:
   push:
     branches:
-      - main
+      - main  # Pas dit aan naar de branch die je wilt gebruiken
 
 jobs:
   build:
-    runs-on: [self-hosted, UBS-DOC-01]
+    # Gebruik een zelf-gehoste runner met het label 'docker-server'
+    runs-on: [self-hosted, docker-server]
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
+    # Stap 1: Checkout de code
+    - name: Checkout repository
+      uses: actions/checkout@v3
 
-      - name: Build Docker image
-        run: docker build -t stijn0vp/website:$GITHUB_SHA .
+    # Stap 2: Log in op Docker Hub met bestaande secrets
+    - name: Log in to Docker Hub
+      run: echo "${{ secrets.docker_password }}" | docker login -u "${{ secrets.docker_username }}" --password-stdin
 
-      - name: Push Docker image
-        run: docker push stijn0vp/website:$GITHUB_SHA
+    # Stap 3: Bouw de Docker-container
+    - name: Build the Docker image
+      run: docker build -t stijn0vp/website:latest .
 
-      - name: Deploy to test
-        run: |
-          docker-compose -f docker-compose.yml up -d test
-          # Update HAProxy to route traffic to test environment
-          ssh user@UBS-PRX-01 'echo "set server http_back/test state ready" | socat stdio /var/run/haproxy.sock'
+    # Stap 4: Push de Docker-image naar Docker Hub
+    - name: Push Docker image to Docker Hub
+      run: docker push stijn0vp/website:latest
 
-  approve:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Await approval
-        uses: hmarr/auto-approve-action@v2.0.0
-
-  deploy:
-    needs: approve
-    runs-on: [self-hosted, UBS-DOC-01]
-    steps:
-      - name: Deploy to production
-        run: |
-          # Determine which environment is currently live
-          CURRENT_ENV=$(curl -s http://UBS-PRX-01 | grep -oP '(?<=server ).*(?= check)')
-          if [ "$CURRENT_ENV" == "test" ]; then
-            NEW_ENV="production"
-          else
-            NEW_ENV="test"
-          fi
-          docker-compose -f docker-compose.yml up -d $NEW_ENV
-          # Update HAProxy to route traffic to new environment
-          ssh user@UBS-PRX-01 "echo 'set server http_back/$NEW_ENV state ready' | socat stdio /var/run/haproxy.sock"
-          ssh user@UBS-PRX-01 "echo 'set server http_back/$CURRENT_ENV state maint' | socat stdio /var/run/haproxy.sock"
+    # Stap 5: Run de Docker-container op de runner met label 'docker-server'
+    - name: Run Docker container
+      run: |
+        docker pull stijn0vp/website:latest
+        docker stop website || true
+        docker rm website || true
+        docker run -d -p 8081:80 --name website stijn0vp/website:latest
