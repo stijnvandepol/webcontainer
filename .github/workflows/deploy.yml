@@ -7,6 +7,7 @@ on:
 
 jobs:
   build:
+    # Gebruik een zelf-gehoste runner met het label 'docker-server'
     runs-on: [self-hosted, docker-server]
 
     steps:
@@ -14,11 +15,11 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v3
 
-    # Stap 2: Log in to Docker Hub
+    # Stap 2: Log in op Docker Hub met bestaande secrets
     - name: Log in to Docker Hub
       run: echo "${{ secrets.docker_password }}" | docker login -u "${{ secrets.docker_username }}" --password-stdin
 
-    # Stap 3: Bouw de Docker-image
+    # Stap 3: Bouw de Docker-container
     - name: Build the Docker image
       run: docker build -t stijn0vp/website:latest .
 
@@ -26,21 +27,41 @@ jobs:
     - name: Push Docker image to Docker Hub
       run: docker push stijn0vp/website:latest
 
-    # Stap 5: Wissel tussen 'blue' en 'green' containers
-    - name: Switch between blue and green containers
+    # Stap 5: Haal de huidige omgeving op (blue of green)
+    - name: Get current environment
+      id: current_env
       run: |
-        current_container=$(docker ps --filter "name=blue" -q)
-        if [ -n "$current_container" ]; then
-          new_container_name="green"
+        if [ -f current_env.txt ]; then
+          current_env=$(cat current_env.txt)
         else
-          new_container_name="blue"
+          current_env=blue
         fi
+        echo "Current environment: $current_env"
+        echo "::set-output name=env::$current_env"
 
-        # Stop en verwijder de huidige container met de nieuwe naam
-        docker stop $new_container_name || true
-        docker rm $new_container_name || true
+    # Stap 6: Wissel de omgeving (blue naar green, of green naar blue)
+    - name: Swap environment
+      id: swap_env
+      run: |
+        if [ "${{ steps.current_env.outputs.env }}" == "blue" ]; then
+          new_env=green
+        else
+          new_env=blue
+        fi
+        echo "New environment: $new_env"
+        echo $new_env > current_env.txt
+        echo "::set-output name=new_env::$new_env"
 
-        # Run de nieuwe container met de juiste naam
-        docker run -d -p 80:80 --name $new_container_name stijn0vp/website:latest
-
-        echo "De nieuwe container is $new_container_name."
+    # Stap 7: Run de Docker-container in de juiste omgeving met de juiste poort
+    - name: Deploy to the new environment
+      run: |
+        new_env="${{ steps.swap_env.outputs.new_env }}"
+        if [ "$new_env" == "blue" ]; then
+          port=8081
+        else
+          port=8082
+        fi
+        docker pull stijn0vp/website:latest
+        docker stop $new_env || true
+        docker rm $new_env || true
+        docker run -d -p $port:80 --name $new_env stijn0vp/website:latest
