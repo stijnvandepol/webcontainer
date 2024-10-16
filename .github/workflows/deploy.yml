@@ -3,10 +3,11 @@ name: Build and Deploy to Docker Hub
 on:
   push:
     branches:
-      - main
+      - main  # Pas dit aan naar de branch die je wilt gebruiken
 
 jobs:
   build:
+    # Gebruik een zelf-gehoste runner met het label 'docker-server'
     runs-on: [self-hosted, docker-server]
 
     steps:
@@ -14,11 +15,11 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v3
 
-    # Stap 2: Log in op Docker Hub
+    # Stap 2: Log in op Docker Hub met bestaande secrets
     - name: Log in to Docker Hub
       run: echo "${{ secrets.docker_password }}" | docker login -u "${{ secrets.docker_username }}" --password-stdin
 
-    # Stap 3: Bouw de Docker-image
+    # Stap 3: Bouw de Docker-container
     - name: Build the Docker image
       run: docker build -t stijn0vp/website:latest .
 
@@ -26,45 +27,38 @@ jobs:
     - name: Push Docker image to Docker Hub
       run: docker push stijn0vp/website:latest
 
-    # Stap 5: Bepaal welke container het langst draait en vervang deze, of start 'blue' als beide containers niet bestaan
-    - name: Determine longest running container
-      id: env
-      run: |
-        # Controleer of de blue container bestaat
-        if docker ps -a --format '{{.Names}}' | grep -Eq "^website-blue$"; then
-          blue_started=$(docker inspect -f '{{ .State.StartedAt }}' website-blue)
-        else
-          blue_started="none"
-        fi
-        
-        # Controleer of de green container bestaat
-        if docker ps -a --format '{{.Names}}' | grep -Eq "^website-green$"; then
-          green_started=$(docker inspect -f '{{ .State.StartedAt }}' website-green)
-        else
-          green_started="none"
-        fi
-
-        # Bepaal welke container moet worden vervangen of start de eerste container
-        if [ "$blue_started" = "none" ] && [ "$green_started" = "none" ]; then
-          echo "env=blue" >> $GITHUB_ENV
-          echo "No containers running, deploying to blue environment."
-        elif [ "$blue_started" = "none" ]; then
-          echo "env=blue" >> $GITHUB_ENV
-        elif [ "$green_started" = "none" ]; then
-          echo "env=green" >> $GITHUB_ENV
-        elif [ "$blue_started" \< "$green_started" ]; then
-          echo "env=blue" >> $GITHUB_ENV
-        else
-          echo "env=green" >> $GITHUB_ENV
-
-    # Stap 6: Vervang de container die het langst draaide of start de eerste container
-    - name: Deploy to Docker container
+    # Stap 5: Run de Docker-container op de runner met label 'docker-server'
+    - name: Deploy container
       run: |
         docker pull stijn0vp/website:latest
-        docker stop website-${{ env.env }} || true
-        docker rm website-${{ env.env }} || true
+        
+        # Check if both containers exist
+        BLUE_EXISTS=$(docker ps -a --filter "name=blue" --format "{{.Names}}")
+        GREEN_EXISTS=$(docker ps -a --filter "name=green" --format "{{.Names}}")
 
-        if [ "${{ env.env }}" = "blue" ]; then
-          docker run -d -p 8080:80 --name website-blue stijn0vp/website:latest
+        if [ -z "$BLUE_EXISTS" ] && [ -z "$GREEN_EXISTS" ]; then
+          # If neither container exists, deploy blue
+          docker run -d -p 8081:80 --name blue stijn0vp/website:latest
+        elif [ -z "$BLUE_EXISTS" ]; then
+          # If only blue doesn't exist, deploy blue
+          docker run -d -p 8081:80 --name blue stijn0vp/website:latest
+        elif [ -z "$GREEN_EXISTS" ]; then
+          # If only green doesn't exist, deploy green
+          docker run -d -p 8082:80 --name green stijn0vp/website:latest
         else
-          docker run -d -p 8081:80 --name website-green stijn0vp/website:latest
+          # If both containers exist, find the one that has been running the longest
+          BLUE_UPTIME=$(docker inspect -f '{{.State.StartedAt}}' blue)
+          GREEN_UPTIME=$(docker inspect -f '{{.State.StartedAt}}' green)
+
+          if [ "$BLUE_UPTIME" \< "$GREEN_UPTIME" ]; then
+            # If blue has been running longer, replace blue
+            docker stop blue
+            docker rm blue
+            docker run -d -p 8081:80 --name blue stijn0vp/website:latest
+          else
+            # If green has been running longer, replace green
+            docker stop green
+            docker rm green
+            docker run -d -p 8082:80 --name green stijn0vp/website:latest
+          fi
+        fi
