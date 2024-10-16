@@ -26,7 +26,7 @@ jobs:
     - name: Push Docker image to Docker Hub
       run: docker push stijn0vp/website:latest
 
-    # Stap 5: Bepaal welke container het langst draait en vervang deze
+    # Stap 5: Bepaal welke container het langst draait en vervang deze, of start 'blue' als beide niet bestaan
     - name: Determine longest running container
       id: env
       run: |
@@ -43,8 +43,11 @@ jobs:
           green_started="none"
         fi
 
-        # Bepaal welke container moet worden vervangen
-        if [ "$blue_started" = "none" ]; then
+        # Bepaal welke container moet worden vervangen of start de eerste container
+        if [ "$blue_started" = "none" ] && [ "$green_started" = "none" ]; then
+          echo "env=blue" >> $GITHUB_ENV
+          echo "No containers running, deploying first container to blue."
+        elif [ "$blue_started" = "none" ]; then
           echo "env=blue" >> $GITHUB_ENV
         elif [ "$green_started" = "none" ]; then
           echo "env=green" >> $GITHUB_ENV
@@ -53,14 +56,16 @@ jobs:
         else
           echo "env=green" >> $GITHUB_ENV
 
-    # Stap 6: Vervang de container die het langst draaide
+    # Stap 6: Vervang de container die het langst draaide, of start de eerste container
     - name: Deploy to Docker container
       run: |
         docker pull stijn0vp/website:latest
-        docker stop website-${{ env.env }} || true
-        docker rm website-${{ env.env }} || true
 
         if [ "${{ env.env }}" = "blue" ]; then
+          docker stop website-blue || true
+          docker rm website-blue || true
           docker run -d -p 8080:80 --name website-blue stijn0vp/website:latest
         else
+          docker stop website-green || true
+          docker rm website-green || true
           docker run -d -p 8081:80 --name website-green stijn0vp/website:latest
