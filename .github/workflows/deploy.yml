@@ -1,13 +1,12 @@
-name: Build and Deploy to Docker Hub
+name: Blue/Green Deployment
 
 on:
   push:
     branches:
-      - main  # Pas dit aan naar de branch die je wilt gebruiken
+      - main
 
 jobs:
   build:
-    # Gebruik een zelf-gehoste runner met het label 'docker-server'
     runs-on: [self-hosted, docker-server]
 
     steps:
@@ -15,7 +14,7 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v3
 
-    # Stap 2: Log in op Docker Hub met bestaande secrets
+    # Stap 2: Log in op Docker Hub
     - name: Log in to Docker Hub
       run: echo "${{ secrets.docker_password }}" | docker login -u "${{ secrets.docker_username }}" --password-stdin
 
@@ -27,31 +26,98 @@ jobs:
     - name: Push Docker image to Docker Hub
       run: docker push stijn0vp/website:latest
 
-    # Stap 5: Run de Docker-container op de runner met label 'docker-server'
+    # Stap 5: Bepaal welke container actief moet zijn
+    - name: Determine active container
+      id: determine-container
+      run: |
+        BLUE_EXISTS=$(docker ps --filter "name=blue" --format "{{.Names}}")
+        GREEN_EXISTS=$(docker ps --filter "name=green" --format "{{.Names}}")
+
+        # Wissel container: als blue draait, stop blue en start green, andersom
+        if [ ! -z "$BLUE_EXISTS" ]; then
+          echo "green" > next-container.txt
+        else
+          echo "blue" > next-container.txt
+        fi
+
+    # Stap 6: Bewaar het bestand next-container.txt als artifact
+    - name: Upload next container artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: next-container
+        path: next-container.txt
+
+    # Stap 7: Stop en verwijder de oude container en start de nieuwe
     - name: Deploy container
       run: |
-        docker pull stijn0vp/website:latest
-        
-        # Check if both containers exist
-        BLUE_EXISTS=$(docker ps -a --filter "name=blue" --format "{{.Names}}")
-        GREEN_EXISTS=$(docker ps -a --filter "name=green" --format "{{.Names}}")
+        NEXT_CONTAINER=$(cat next-container.txt)
 
-        if [ -z "$BLUE_EXISTS" ] && [ -z "$GREEN_EXISTS" ]; then                    #Als beide containers niet bestaan, deploy blue
+        if [ "$NEXT_CONTAINER" = "blue" ]; then
+          # Stop en verwijder de oude "blue" container indien deze nog bestaat
+          docker stop blue || true
+          docker rm blue || true
+          # Start de nieuwe "blue" container
           docker run -d -p 8081:80 --name blue stijn0vp/website:latest
-        elif [ -z "$BLUE_EXISTS" ]; then                                            #Als blue niet bestaat, deploy blue
-          docker run -d -p 8081:80 --name blue stijn0vp/website:latest
-        elif [ -z "$GREEN_EXISTS" ]; then                                           #Als green niet bestaat, deploy green
-          docker run -d -p 8082:80 --name green stijn0vp/website:latest
         else
-          BLUE_UPTIME=$(docker inspect -f '{{.State.StartedAt}}' blue)              #Als beide containers bestaan, stop de oudste en deploy de nieuwe
-          GREEN_UPTIME=$(docker inspect -f '{{.State.StartedAt}}' green)
-          if [ "$BLUE_UPTIME" \< "$GREEN_UPTIME" ]; then
-            docker stop blue
-            docker rm blue
-            docker run -d -p 8081:80 --name blue stijn0vp/website:latest
-          else
-            docker stop green
-            docker rm green
-            docker run -d -p 8082:80 --name green stijn0vp/website:latest
-          fi
+          # Stop en verwijder de oude "green" container indien deze nog bestaat
+          docker stop green || true
+          docker rm green || true
+          # Start de nieuwe "green" container
+          docker run -d -p 8082:80 --name green stijn0vp/website:latest
         fi
+
+  test:
+    runs-on: [self-hosted, docker-server]
+    needs: build
+
+    steps:
+    # Stap 8: Test de nieuwe container
+    - name: Test new environment
+      run: |
+        # Voeg hier je testcommando's toe, bijvoorbeeld met curl of een andere tool
+        NEXT_CONTAINER=$(cat next-container.txt)
+        if [ "$NEXT_CONTAINER" = "blue" ]; then
+          curl -f http://localhost:8081  # Test de blue container
+        else
+          curl -f http://localhost:8082  # Test de green container
+        fi
+
+  approval:
+    runs-on: ubuntu-latest  # Gebruik een GitHub-hosted runner voor de goedkeuring
+    needs: test
+
+    steps:
+    # Stap 9: Handmatige goedkeuring vereisen met trstringer/manual-approval
+    - name: Manual approval
+      uses: trstringer/manual-approval@v1
+      with:
+        secret: ${{ github.TOKEN }}
+        approvers: stijnvandepol
+
+  update-haproxy:
+    runs-on: [self-hosted, haproxy-server]
+    needs: approval  # Wacht op goedkeuring voordat de job wordt uitgevoerd
+
+    steps:
+    # Stap 10: Haal het artifact op van de vorige job
+    - name: Download next container artifact
+      uses: actions/download-artifact@v3
+      with:
+        name: next-container
+
+    # Stap 11: Schakel HAProxy naar de juiste container
+    - name: Update HAProxy config
+      run: |
+        NEXT_CONTAINER=$(cat next-container.txt)
+
+        if [ "$NEXT_CONTAINER" = "blue" ]; then
+          NEW_BACKEND="server blue 172.16.2.40:8081 check"
+        else
+          NEW_BACKEND="server green 172.16.2.40:8082 check"
+        fi
+
+        # Update HAProxy config
+        sudo sed -i "s/^    server.*/    $NEW_BACKEND/" /etc/haproxy/haproxy.cfg
+        
+        # Restart HAProxy to apply changes
+        sudo systemctl restart haproxy
