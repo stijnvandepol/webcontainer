@@ -3,11 +3,10 @@ name: Blue/Green Deployment
 on:
   push:
     branches:
-      - main  # Voor builds bij push naar de 'main' branch
+      - main
 
 jobs:
   build:
-    # Gebruik een zelf-gehoste runner met het label 'docker-server'
     runs-on: [self-hosted, docker-server]
 
     steps:
@@ -15,7 +14,7 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v3
 
-    # Stap 2: Log in op Docker Hub met bestaande secrets
+    # Stap 2: Log in op Docker Hub
     - name: Log in to Docker Hub
       run: echo "${{ secrets.docker_password }}" | docker login -u "${{ secrets.docker_username }}" --password-stdin
 
@@ -27,57 +26,48 @@ jobs:
     - name: Push Docker image to Docker Hub
       run: docker push stijn0vp/website:latest
 
-    # Stap 5: Bepaal welke container (blue of green) actief moet zijn
+    # Stap 5: Bepaal welke container actief moet zijn
     - name: Determine active container
       id: determine-container
       run: |
-        # Lees de huidige status uit het statusbestand
-        if [ -f deploy-status.txt ]; then
-          CURRENT_CONTAINER=$(cat deploy-status.txt)
+        BLUE_EXISTS=$(docker ps --filter "name=blue" --format "{{.Names}}")
+        GREEN_EXISTS=$(docker ps --filter "name=green" --format "{{.Names}}")
+
+        # Wissel container: als blue draait, stop blue en start green, andersom
+        if [ ! -z "$BLUE_EXISTS" ]; then
+          echo "green" > next-container.txt
         else
-          CURRENT_CONTAINER="green"
+          echo "blue" > next-container.txt
         fi
 
-        # Wissel tussen blue en green
-        if [ "$CURRENT_CONTAINER" = "blue" ]; then
-          NEXT_CONTAINER="green"
-        else
-          NEXT_CONTAINER="blue"
-        fi
-
-        # Schrijf de nieuwe status terug naar het statusbestand
-        echo $NEXT_CONTAINER > deploy-status.txt
-
-        # Sla de nieuwe container op als output
-        echo "::set-output name=next-container::$NEXT_CONTAINER"
-
-    # Stap 6: Deploy de nieuwe container op de Docker-server
+    # Stap 6: Stop en verwijder de oude container en start de nieuwe
     - name: Deploy container
       run: |
-        docker pull stijn0vp/website:latest
-        
-        NEXT_CONTAINER=${{ steps.determine-container.outputs.next-container }}
+        NEXT_CONTAINER=$(cat next-container.txt)
 
         if [ "$NEXT_CONTAINER" = "blue" ]; then
-          docker stop green || true
-          docker rm green || true
-          docker run -d -p 8081:80 --name blue stijn0vp/website:latest
-        else
+          # Stop en verwijder de oude "blue" container indien deze nog bestaat
           docker stop blue || true
           docker rm blue || true
+          # Start de nieuwe "blue" container
+          docker run -d -p 8081:80 --name blue stijn0vp/website:latest
+        else
+          # Stop en verwijder de oude "green" container indien deze nog bestaat
+          docker stop green || true
+          docker rm green || true
+          # Start de nieuwe "green" container
           docker run -d -p 8082:80 --name green stijn0vp/website:latest
         fi
 
-  # Schakel HAProxy naar de nieuwe container
   update-haproxy:
     runs-on: [self-hosted, haproxy-server]
     needs: build
 
     steps:
-    # Stap 7: Schakel HAProxy naar de juiste container
+    # Schakel HAProxy naar de juiste container
     - name: Update HAProxy config
       run: |
-        NEXT_CONTAINER=${{ steps.determine-container.outputs.next-container }}
+        NEXT_CONTAINER=$(cat next-container.txt)
 
         if [ "$NEXT_CONTAINER" = "blue" ]; then
           NEW_BACKEND="server blue 172.16.2.40:8081 check"
@@ -90,12 +80,3 @@ jobs:
         
         # Restart HAProxy to apply changes
         sudo systemctl restart haproxy
-
-    # Stap 8: Update het statusbestand in de repository
-    - name: Commit and push updated status
-      run: |
-        git config --global user.email "your-email@example.com"
-        git config --global user.name "Your Name"
-        git add deploy-status.txt
-        git commit -m "Update deploy status to $NEXT_CONTAINER"
-        git push
