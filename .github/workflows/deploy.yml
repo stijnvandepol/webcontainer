@@ -1,9 +1,9 @@
-name: Build and Deploy to Docker Hub
+name: Blue/Green Deployment
 
 on:
   push:
     branches:
-      - main  # Pas dit aan naar de branch die je wilt gebruiken
+      - main  # Voor builds bij push naar de 'main' branch
 
 jobs:
   build:
@@ -27,31 +27,75 @@ jobs:
     - name: Push Docker image to Docker Hub
       run: docker push stijn0vp/website:latest
 
-    # Stap 5: Run de Docker-container op de runner met label 'docker-server'
+    # Stap 5: Bepaal welke container (blue of green) actief moet zijn
+    - name: Determine active container
+      id: determine-container
+      run: |
+        # Lees de huidige status uit het statusbestand
+        if [ -f deploy-status.txt ]; then
+          CURRENT_CONTAINER=$(cat deploy-status.txt)
+        else
+          CURRENT_CONTAINER="green"
+        fi
+
+        # Wissel tussen blue en green
+        if [ "$CURRENT_CONTAINER" = "blue" ]; then
+          NEXT_CONTAINER="green"
+        else
+          NEXT_CONTAINER="blue"
+        fi
+
+        # Schrijf de nieuwe status terug naar het statusbestand
+        echo $NEXT_CONTAINER > deploy-status.txt
+
+        # Sla de nieuwe container op als output
+        echo "::set-output name=next-container::$NEXT_CONTAINER"
+
+    # Stap 6: Deploy de nieuwe container op de Docker-server
     - name: Deploy container
       run: |
         docker pull stijn0vp/website:latest
         
-        # Check if both containers exist
-        BLUE_EXISTS=$(docker ps -a --filter "name=blue" --format "{{.Names}}")
-        GREEN_EXISTS=$(docker ps -a --filter "name=green" --format "{{.Names}}")
+        NEXT_CONTAINER=${{ steps.determine-container.outputs.next-container }}
 
-        if [ -z "$BLUE_EXISTS" ] && [ -z "$GREEN_EXISTS" ]; then                    #Als beide containers niet bestaan, deploy blue
+        if [ "$NEXT_CONTAINER" = "blue" ]; then
+          docker stop green || true
+          docker rm green || true
           docker run -d -p 8081:80 --name blue stijn0vp/website:latest
-        elif [ -z "$BLUE_EXISTS" ]; then                                            #Als blue niet bestaat, deploy blue
-          docker run -d -p 8081:80 --name blue stijn0vp/website:latest
-        elif [ -z "$GREEN_EXISTS" ]; then                                           #Als green niet bestaat, deploy green
-          docker run -d -p 8082:80 --name green stijn0vp/website:latest
         else
-          BLUE_UPTIME=$(docker inspect -f '{{.State.StartedAt}}' blue)              #Als beide containers bestaan, stop de oudste en deploy de nieuwe
-          GREEN_UPTIME=$(docker inspect -f '{{.State.StartedAt}}' green)
-          if [ "$BLUE_UPTIME" \< "$GREEN_UPTIME" ]; then
-            docker stop blue
-            docker rm blue
-            docker run -d -p 8081:80 --name blue stijn0vp/website:latest
-          else
-            docker stop green
-            docker rm green
-            docker run -d -p 8082:80 --name green stijn0vp/website:latest
-          fi
+          docker stop blue || true
+          docker rm blue || true
+          docker run -d -p 8082:80 --name green stijn0vp/website:latest
         fi
+
+  # Schakel HAProxy naar de nieuwe container
+  update-haproxy:
+    runs-on: [self-hosted, haproxy-server]
+    needs: build
+
+    steps:
+    # Stap 7: Schakel HAProxy naar de juiste container
+    - name: Update HAProxy config
+      run: |
+        NEXT_CONTAINER=${{ steps.determine-container.outputs.next-container }}
+
+        if [ "$NEXT_CONTAINER" = "blue" ]; then
+          NEW_BACKEND="server blue 172.16.2.40:8081 check"
+        else
+          NEW_BACKEND="server green 172.16.2.40:8082 check"
+        fi
+
+        # Update HAProxy config
+        sudo sed -i '/^    server/s/.*/    '$NEW_BACKEND'/' /etc/haproxy/haproxy.cfg
+        
+        # Restart HAProxy to apply changes
+        sudo systemctl restart haproxy
+
+    # Stap 8: Update het statusbestand in de repository
+    - name: Commit and push updated status
+      run: |
+        git config --global user.email "your-email@example.com"
+        git config --global user.name "Your Name"
+        git add deploy-status.txt
+        git commit -m "Update deploy status to $NEXT_CONTAINER"
+        git push
