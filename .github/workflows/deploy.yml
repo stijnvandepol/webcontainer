@@ -66,19 +66,30 @@ jobs:
           docker run -d -p 8082:80 --name green stijn0vp/website:latest
         fi
 
-  update-haproxy:
+  approval:
     runs-on: [self-hosted, haproxy-server]
     needs: build
-    environment: production  # Voeg de environment toe om goedkeuring af te dwingen
 
     steps:
-    # Stap 8: Haal het artifact op van de vorige job
+    # Stap 8: Handmatige goedkeuring vereisen met trstringer/manual-approval
+    - name: Manual approval
+      uses: trstringer/manual-approval@v1
+      with:
+        secret: ${{ github.TOKEN }}
+        approvers: stijnvandepol
+
+  update-haproxy:
+    runs-on: [self-hosted, haproxy-server]
+    needs: approval  # Wacht op goedkeuring voordat de job wordt uitgevoerd
+
+    steps:
+    # Stap 9: Haal het artifact op van de vorige job
     - name: Download next container artifact
       uses: actions/download-artifact@v3
       with:
         name: next-container
 
-    # Stap 9: Schakel HAProxy naar de juiste container
+    # Stap 10: Schakel HAProxy naar de juiste container
     - name: Update HAProxy config
       run: |
         NEXT_CONTAINER=$(cat next-container.txt)
@@ -90,7 +101,7 @@ jobs:
         fi
 
         # Update HAProxy config
-        sudo sed -i '/^    server/s/.*/    '$NEW_BACKEND'/' /etc/haproxy/haproxy.cfg
+        sudo sed -i "s/^    server.*/    $NEW_BACKEND/" /etc/haproxy/haproxy.cfg
         
         # Restart HAProxy to apply changes
         sudo systemctl restart haproxy
