@@ -30,9 +30,20 @@ jobs:
     - name: Determine longest running container
       id: env
       run: |
-        blue_started=$(docker inspect -f '{{ .State.StartedAt }}' website-blue || echo "none")
-        green_started=$(docker inspect -f '{{ .State.StartedAt }}' website-green || echo "none")
+        # Controleer of de containers bestaan
+        if docker ps -a --format '{{.Names}}' | grep -Eq "^website-blue$"; then
+          blue_started=$(docker inspect -f '{{ .State.StartedAt }}' website-blue)
+        else
+          blue_started="none"
+        fi
+        
+        if docker ps -a --format '{{.Names}}' | grep -Eq "^website-green$"; then
+          green_started=$(docker inspect -f '{{ .State.StartedAt }}' website-green)
+        else
+          green_started="none"
+        fi
 
+        # Bepaal welke container moet worden vervangen
         if [ "$blue_started" = "none" ]; then
           echo "env=blue" >> $GITHUB_ENV
         elif [ "$green_started" = "none" ]; then
@@ -50,6 +61,6 @@ jobs:
         docker rm website-${{ env.env }} || true
 
         if [ "${{ env.env }}" = "blue" ]; then
-          docker run -d -p 8081:80 --name website-blue stijn0vp/website:latest
+          docker run -d -p 8080:80 --name website-blue stijn0vp/website:latest
         else
-          docker run -d -p 8082:80 --name website-green stijn0vp/website:latest
+          docker run -d -p 8081:80 --name website-green stijn0vp/website:latest
