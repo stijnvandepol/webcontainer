@@ -1,0 +1,50 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: [self-hosted, UBS-DOC-01]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Build Docker image
+        run: docker build -t stijn0vp/website:$GITHUB_SHA .
+
+      - name: Push Docker image
+        run: docker push stijn0vp/website:$GITHUB_SHA
+
+      - name: Deploy to test
+        run: |
+          docker-compose -f docker-compose.yml up -d test
+          # Update HAProxy to route traffic to test environment
+          ssh user@UBS-PRX-01 'echo "set server http_back/test state ready" | socat stdio /var/run/haproxy.sock'
+
+  approve:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Await approval
+        uses: hmarr/auto-approve-action@v2.0.0
+
+  deploy:
+    needs: approve
+    runs-on: [self-hosted, UBS-DOC-01]
+    steps:
+      - name: Deploy to production
+        run: |
+          # Determine which environment is currently live
+          CURRENT_ENV=$(curl -s http://UBS-PRX-01 | grep -oP '(?<=server ).*(?= check)')
+          if [ "$CURRENT_ENV" == "test" ]; then
+            NEW_ENV="production"
+          else
+            NEW_ENV="test"
+          fi
+          docker-compose -f docker-compose.yml up -d $NEW_ENV
+          # Update HAProxy to route traffic to new environment
+          ssh user@UBS-PRX-01 "echo 'set server http_back/$NEW_ENV state ready' | socat stdio /var/run/haproxy.sock"
+          ssh user@UBS-PRX-01 "echo 'set server http_back/$CURRENT_ENV state maint' | socat stdio /var/run/haproxy.sock"
