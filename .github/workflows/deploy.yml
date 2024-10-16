@@ -58,7 +58,7 @@ jobs:
 
   approval:
     runs-on: ubuntu-latest  # Gebruik een GitHub-hosted runner voor de goedkeuring
-    needs: test
+    needs: build
 
     steps:
     # Stap 9: Handmatige goedkeuring vereisen met trstringer/manual-approval
