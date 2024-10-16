@@ -55,3 +55,26 @@ jobs:
             docker run -d -p 8082:80 --name green stijn0vp/website:latest
           fi
         fi
+
+  approval:
+    runs-on: ubuntu-latest  # Gebruik een GitHub-hosted runner voor de goedkeuring
+    needs: test
+
+    steps:
+    # Stap 9: Handmatige goedkeuring vereisen met trstringer/manual-approval
+    - name: Manual approval
+      uses: trstringer/manual-approval@v1
+      with:
+        secret: ${{ github.TOKEN }}
+        approvers: stijnvandepol
+
+  update-haproxy:
+    runs-on: [self-hosted, haproxy-server]
+    needs: approval  # Wacht op goedkeuring voordat de job wordt uitgevoerd
+
+    steps:
+    - name: Switch proxy
+      run: |
+        echo "Running switchconfig.sh..."
+        bash /home/student/switchconfig.sh 2>&1
+        echo "switchconfig.sh executed successfully."
