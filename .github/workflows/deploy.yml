@@ -40,7 +40,14 @@ jobs:
           echo "blue" > next-container.txt
         fi
 
-    # Stap 6: Stop en verwijder de oude container en start de nieuwe
+    # Stap 6: Bewaar het bestand next-container.txt als artifact
+    - name: Upload next container artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: next-container
+        path: next-container.txt
+
+    # Stap 7: Stop en verwijder de oude container en start de nieuwe
     - name: Deploy container
       run: |
         NEXT_CONTAINER=$(cat next-container.txt)
@@ -65,7 +72,13 @@ jobs:
     environment: production  # Voeg de environment toe om goedkeuring af te dwingen
 
     steps:
-    # Stap 7: Schakel HAProxy naar de juiste container
+    # Stap 8: Haal het artifact op van de vorige job
+    - name: Download next container artifact
+      uses: actions/download-artifact@v3
+      with:
+        name: next-container
+
+    # Stap 9: Schakel HAProxy naar de juiste container
     - name: Update HAProxy config
       run: |
         NEXT_CONTAINER=$(cat next-container.txt)
