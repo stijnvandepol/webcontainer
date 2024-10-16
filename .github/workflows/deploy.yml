@@ -76,7 +76,7 @@ jobs:
       uses: trstringer/manual-approval@v1
       with:
         secret: ${{ github.TOKEN }}
-        approvers: user1,user2  # Pas deze waarden aan naar de juiste gebruikers
+        approvers: stijnvdpol  # Pas deze waarden aan naar de juiste gebruikers
         minimum-approvals: 1
         issue-title: "Deploying new version to HAProxy"
         issue-body: "Please approve or deny the deployment of the new version to HAProxy."
