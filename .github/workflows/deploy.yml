@@ -7,7 +7,6 @@ on:
 
 jobs:
   build:
-    # Gebruik een zelf-gehoste runner met het label 'docker-server'
     runs-on: [self-hosted, docker-server]
 
     steps:
@@ -15,11 +14,11 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v3
 
-    # Stap 2: Log in op Docker Hub met bestaande secrets
+    # Stap 2: Log in to Docker Hub
     - name: Log in to Docker Hub
       run: echo "${{ secrets.docker_password }}" | docker login -u "${{ secrets.docker_username }}" --password-stdin
 
-    # Stap 3: Bouw de Docker-container
+    # Stap 3: Bouw de Docker-image
     - name: Build the Docker image
       run: docker build -t stijn0vp/website:latest .
 
@@ -27,10 +26,21 @@ jobs:
     - name: Push Docker image to Docker Hub
       run: docker push stijn0vp/website:latest
 
-    # Stap 5: Run de Docker-container op de runner met label 'docker-server'
-    - name: Run Docker container
+    # Stap 5: Wissel tussen 'blue' en 'green' containers
+    - name: Switch between blue and green containers
       run: |
-        docker pull stijn0vp/website:latest
-        docker stop website || true
-        docker rm website || true
-        docker run -d -p 8081:80 --name website stijn0vp/website:latest
+        current_container=$(docker ps --filter "name=blue" -q)
+        if [ -n "$current_container" ]; then
+          new_container_name="green"
+        else
+          new_container_name="blue"
+        fi
+
+        # Stop en verwijder de huidige container met de nieuwe naam
+        docker stop $new_container_name || true
+        docker rm $new_container_name || true
+
+        # Run de nieuwe container met de juiste naam
+        docker run -d -p 80:80 --name $new_container_name stijn0vp/website:latest
+
+        echo "De nieuwe container is $new_container_name."
