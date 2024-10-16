@@ -39,7 +39,7 @@ jobs:
         echo "Current environment: $current_env"
         echo "::set-output name=env::$current_env"
 
-    # Stap 6: Wissel de omgeving (blue naar green, of green naar blue)
+    # Stap 6: Wissel de omgeving (blue naar green, of green naar blue) en sla deze op
     - name: Swap environment
       id: swap_env
       run: |
@@ -48,7 +48,7 @@ jobs:
         else
           new_env=blue
         fi
-        echo "New environment: $new_env"
+        echo "Switching to environment: $new_env"
         echo $new_env > current_env.txt
         echo "::set-output name=new_env::$new_env"
 
@@ -61,6 +61,7 @@ jobs:
         else
           port=8082
         fi
+        echo "Deploying to $new_env environment on port $port"
         docker pull stijn0vp/website:latest
         docker stop $new_env || true
         docker rm $new_env || true
