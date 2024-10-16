@@ -3,7 +3,8 @@ name: Build and Deploy to Docker Hub
 on:
   push:
     branches:
-      - main  # Pas dit aan naar de branch die je wilt gebruiken
+      - main  # Voor builds bij push naar de 'main' branch
+  workflow_dispatch:  # Handmatige trigger voor goedkeuringsworkflow
 
 jobs:
   build:
@@ -27,7 +28,7 @@ jobs:
     - name: Push Docker image to Docker Hub
       run: docker push stijn0vp/website:latest
 
-    # Stap 5: Run de Docker-container op de runner met label 'docker-server'
+    # Stap 5: Deploy de nieuwe container op de runner met label 'docker-server'
     - name: Deploy container
       run: |
         docker pull stijn0vp/website:latest
@@ -54,24 +55,31 @@ jobs:
             docker rm green
             docker run -d -p 8082:80 --name green stijn0vp/website:latest
           fi
-        fi
 
+  # Goedkeuring vereisen voordat HAProxy wordt aangepast
   approval:
-    runs-on: [self-hosted, haproxy-server]
+    runs-on: [self-hosted, haproxy-server]  # Zorg ervoor dat HAProxy op een andere server draait
     needs: build
-    environment: production
 
     steps:
+    # Stap 6: Manual approval
+    - name: Await manual approval
+      uses: actions/manual-approval@v1  # Simuleer handmatige goedkeuring, of maak gebruik van 'workflow_dispatch' triggers voor goedkeuring
+
+    # Stap 7: Schakel HAProxy naar de nieuwe container op poort 80
     - name: Update HAProxy config
       run: |
         BLUE_EXISTS=$(docker ps -a --filter "name=blue" --format "{{.Names}}")
         GREEN_EXISTS=$(docker ps -a --filter "name=green" --format "{{.Names}}")
 
         if [ ! -z "$BLUE_EXISTS" ]; then
-          NEW_BACKEND="server blue 172.16.2.40:8081 check"
+          NEW_BACKEND="server blue 172.16.2.40:8081 check"   # Verkeer naar 'blue' container
         else
-          NEW_BACKEND="server green 172.16.2.40:8082 check"
+          NEW_BACKEND="server green 172.16.2.40:8082 check"  # Verkeer naar 'green' container
         fi
 
+        # Update HAProxy config op de HAProxy-server
         sudo sed -i '/^    server/s/.*/    '$NEW_BACKEND'/' /etc/haproxy/haproxy.cfg
+        
+        # Restart HAProxy to apply changes
         sudo systemctl restart haproxy
