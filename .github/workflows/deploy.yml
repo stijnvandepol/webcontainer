@@ -30,22 +30,23 @@ jobs:
         BLUE_EXISTS=$(docker ps -a --filter "name=blue" --format "{{.Names}}")
         GREEN_EXISTS=$(docker ps -a --filter "name=green" --format "{{.Names}}")
 
-        if [ -z "$BLUE_EXISTS" ] && [ -z "$GREEN_EXISTS" ]; then                    # Als beide containers niet bestaan, deploy blue
+        if [ -z "$BLUE_EXISTS" ] && [ -z "$GREEN_EXISTS" ]; then                          # If neither container exists, deploy blue
           docker run -d -p 8081:80 --name blue stijn0vp/website:latest
-        elif [ -z "$BLUE_EXISTS" ]; then                                            # Als blue niet bestaat, deploy blue
+        elif [ -z "$BLUE_EXISTS" ]; then                                                  # If only blue doesn't exist, deploy blue
           docker run -d -p 8081:80 --name blue stijn0vp/website:latest
-        elif [ -z "$GREEN_EXISTS" ]; then                                           # Als green niet bestaat, deploy green
+        elif [ -z "$GREEN_EXISTS" ]; then                                                 # If only green doesn't exist, deploy green
           docker run -d -p 8082:80 --name green stijn0vp/website:latest
-        else
-          BLUE_UPTIME=$(docker inspect -f '{{.State.StartedAt}}' blue)              # Als beide containers bestaan, bepaal de oudste en hernoem
+        else                                                                          # If both containers exist, check which one has been running longer and replace the other
+          BLUE_UPTIME=$(docker inspect -f '{{.State.StartedAt}}' blue)
           GREEN_UPTIME=$(docker inspect -f '{{.State.StartedAt}}' green)
-          if [ "$BLUE_UPTIME" \< "$GREEN_UPTIME" ]; then
+
+          if [ "$BLUE_UPTIME" \< "$GREEN_UPTIME" ]; then                        # If blue has been running longer, replace blue
             docker stop blue
-            docker rename blue blue_old                                             # Hernoem in plaats van verwijderen
+            docker rm blue
             docker run -d -p 8081:80 --name blue stijn0vp/website:latest
-          else
+          else                                                                  # If green has been running longer, replace green
             docker stop green
-            docker rename green green_old                                           # Hernoem in plaats van verwijderen
+            docker rm green
             docker run -d -p 8082:80 --name green stijn0vp/website:latest
           fi
         fi
