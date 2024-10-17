@@ -79,17 +79,22 @@ jobs:
         echo "${{ secrets.SUDO_PASSWORD }}" | sudo -S bash /home/student/switchconfig.sh 2>&1
         echo "switchconfig.sh executed successfully."
 
+  remove-old-container:
+    runs-on: [self-hosted, docker-server]
+    needs: update-haproxy  # Deze job draait na het succesvol uitvoeren van update-haproxy
+
+    steps:
     - name: Remove old container
       run: |
-        # Check if old container exists and remove it
         BLUE_OLD_EXISTS=$(docker ps -a --filter "name=blue_old" --format "{{.Names}}")
         GREEN_OLD_EXISTS=$(docker ps -a --filter "name=green_old" --format "{{.Names}}")
 
         if [ -n "$BLUE_OLD_EXISTS" ]; then
-          docker rm blue_old
+          docker rm blue_old || echo "No blue_old container to remove"
         elif [ -n "$GREEN_OLD_EXISTS" ]; then
-          docker rm green_old
+          docker rm green_old || echo "No green_old container to remove"
         fi
+
 
   rollback:
     runs-on: [self-hosted, docker-server]
@@ -104,13 +109,14 @@ jobs:
         GREEN_OLD_EXISTS=$(docker ps -a --filter "name=green_old" --format "{{.Names}}")
 
         if [ -n "$BLUE_OLD_EXISTS" ]; then
-          docker stop blue
-          docker rm blue
-          docker rename blue_old blue                                               # Herstel blue_old naar blue
+          docker stop blue || echo "No blue container running"
+          docker rm blue || echo "No blue container to remove"
+          docker rename blue_old blue
           docker start blue
         elif [ -n "$GREEN_OLD_EXISTS" ]; then
-          docker stop green
-          docker rm green
-          docker rename green_old green                                             # Herstel green_old naar green
+          docker stop green || echo "No green container running"
+          docker rm green || echo "No green container to remove"
+          docker rename green_old green
           docker start green
         fi
+
