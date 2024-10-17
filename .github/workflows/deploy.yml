@@ -36,22 +36,22 @@ jobs:
         BLUE_EXISTS=$(docker ps -a --filter "name=blue" --format "{{.Names}}")
         GREEN_EXISTS=$(docker ps -a --filter "name=green" --format "{{.Names}}")
 
-        if [ -z "$BLUE_EXISTS" ] && [ -z "$GREEN_EXISTS" ]; then                    #Als beide containers niet bestaan, deploy blue
+        if [ -z "$BLUE_EXISTS" ] && [ -z "$GREEN_EXISTS" ]; then                    # Als beide containers niet bestaan, deploy blue
           docker run -d -p 8081:80 --name blue stijn0vp/website:latest
-        elif [ -z "$BLUE_EXISTS" ]; then                                            #Als blue niet bestaat, deploy blue
+        elif [ -z "$BLUE_EXISTS" ]; then                                            # Als blue niet bestaat, deploy blue
           docker run -d -p 8081:80 --name blue stijn0vp/website:latest
-        elif [ -z "$GREEN_EXISTS" ]; then                                           #Als green niet bestaat, deploy green
+        elif [ -z "$GREEN_EXISTS" ]; then                                           # Als green niet bestaat, deploy green
           docker run -d -p 8082:80 --name green stijn0vp/website:latest
         else
-          BLUE_UPTIME=$(docker inspect -f '{{.State.StartedAt}}' blue)              #Als beide containers bestaan, stop de oudste en deploy de nieuwe
+          BLUE_UPTIME=$(docker inspect -f '{{.State.StartedAt}}' blue)              # Als beide containers bestaan, stop de oudste en deploy de nieuwe
           GREEN_UPTIME=$(docker inspect -f '{{.State.StartedAt}}' green)
           if [ "$BLUE_UPTIME" \< "$GREEN_UPTIME" ]; then
-            docker stop blue
-            docker rm blue
+            docker stop blue || true
+            docker rm blue || true
             docker run -d -p 8081:80 --name blue stijn0vp/website:latest
           else
-            docker stop green
-            docker rm green
+            docker stop green || true
+            docker rm green || true
             docker run -d -p 8082:80 --name green stijn0vp/website:latest
           fi
         fi
