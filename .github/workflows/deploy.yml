@@ -7,27 +7,21 @@ on:
 
 jobs:
   build:
-    # Gebruik een zelf-gehoste runner met het label 'docker-server'
     runs-on: [self-hosted, docker-server]
 
     steps:
-    # Stap 1: Checkout de code
     - name: Checkout repository
       uses: actions/checkout@v3
 
-    # Stap 2: Log in op Docker Hub met bestaande secrets
     - name: Log in to Docker Hub
       run: echo "${{ secrets.docker_password }}" | docker login -u "${{ secrets.docker_username }}" --password-stdin
 
-    # Stap 3: Bouw de Docker-container
     - name: Build the Docker image
       run: docker build -t stijn0vp/website:latest .
 
-    # Stap 4: Push de Docker-image naar Docker Hub
     - name: Push Docker image to Docker Hub
       run: docker push stijn0vp/website:latest
 
-    # Stap 5: Run de Docker-container op de runner met label 'docker-server'
     - name: Deploy container
       run: |
         docker pull stijn0vp/website:latest
@@ -36,20 +30,27 @@ jobs:
         BLUE_EXISTS=$(docker ps -a --filter "name=blue" --format "{{.Names}}")
         GREEN_EXISTS=$(docker ps -a --filter "name=green" --format "{{.Names}}")
 
-        if [ -z "$BLUE_EXISTS" ] && [ -z "$GREEN_EXISTS" ]; then                    # Als beide containers niet bestaan, deploy blue
+        if [ -z "$BLUE_EXISTS" ] && [ -z "$GREEN_EXISTS" ]; then
+          # If neither container exists, deploy blue
           docker run -d -p 8081:80 --name blue stijn0vp/website:latest
-        elif [ -z "$BLUE_EXISTS" ]; then                                            # Als blue niet bestaat, deploy blue
+        elif [ -z "$BLUE_EXISTS" ]; then
+          # If only blue doesn't exist, deploy blue
           docker run -d -p 8081:80 --name blue stijn0vp/website:latest
-        elif [ -z "$GREEN_EXISTS" ]; then                                           # Als green niet bestaat, deploy green
+        elif [ -z "$GREEN_EXISTS" ]; then
+          # If only green doesn't exist, deploy green
           docker run -d -p 8082:80 --name green stijn0vp/website:latest
         else
-          BLUE_UPTIME=$(docker inspect -f '{{.State.StartedAt}}' blue)              # Als beide containers bestaan, stop de oudste en deploy de nieuwe
+          # If both containers exist, find the one that has been running the longest
+          BLUE_UPTIME=$(docker inspect -f '{{.State.StartedAt}}' blue)
           GREEN_UPTIME=$(docker inspect -f '{{.State.StartedAt}}' green)
+
           if [ "$BLUE_UPTIME" \< "$GREEN_UPTIME" ]; then
+            # If blue has been running longer, replace blue
             docker stop blue || true
             docker rm blue || true
             docker run -d -p 8081:80 --name blue stijn0vp/website:latest
           else
+            # If green has been running longer, replace green
             docker stop green || true
             docker rm green || true
             docker run -d -p 8082:80 --name green stijn0vp/website:latest
@@ -57,11 +58,10 @@ jobs:
         fi
 
   approval:
-    runs-on: ubuntu-latest  # Gebruik een GitHub-hosted runner voor de goedkeuring
+    runs-on: ubuntu-latest
     needs: build
 
     steps:
-    # Stap 9: Handmatige goedkeuring vereisen met trstringer/manual-approval
     - name: Manual approval
       uses: trstringer/manual-approval@v1
       with:
@@ -96,24 +96,12 @@ jobs:
           if [ "$BLUE_UPTIME" \> "$GREEN_UPTIME" ]; then
             # Blue is the most recently created container
             echo "Stopping and removing the most recent container: blue"
-            docker stop blue || echo "No blue container running"
-            docker rm blue || echo "No blue container to remove"
+            docker stop blue || true
+            docker rm blue || true
           else
             # Green is the most recently created container
             echo "Stopping and removing the most recent container: green"
-            docker stop green || echo "No green container running"
-            docker rm green || echo "No green container to remove"
+            docker stop green || true
+            docker rm green || true
           fi
-        elif [ -n "$BLUE_UPTIME" ]; then
-          # Only blue exists, so remove it
-          echo "Stopping and removing the container: blue"
-          docker stop blue || echo "No blue container running"
-          docker rm blue || echo "No blue container to remove"
-        elif [ -n "$GREEN_UPTIME" ]; then
-          # Only green exists, so remove it
-          echo "Stopping and removing the container: green"
-          docker stop green || echo "No green container running"
-          docker rm green || echo "No green container to remove"
-        else
-          echo "No containers to remove."
         fi
