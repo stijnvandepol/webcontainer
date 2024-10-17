@@ -73,6 +73,19 @@ jobs:
         bash /home/student/switchconfig.sh 2>&1
         echo "switchconfig.sh executed successfully."
 
+    - name: Remove old container
+      run: |
+        # Verwijder de oude container na succesvolle switch
+        OLD_CONTAINER=$(docker ps -a --filter "name=blue_old" --format "{{.Names}}")
+        if [ -n "$OLD_CONTAINER" ]; then
+          docker rm blue_old
+        else
+          OLD_CONTAINER=$(docker ps -a --filter "name=green_old" --format "{{.Names}}")
+          if [ -n "$OLD_CONTAINER" ]; then
+            docker rm green_old
+          fi
+        fi
+
   rollback:
     runs-on: [self-hosted, docker-server]
     needs: approval
@@ -93,4 +106,17 @@ jobs:
           docker rm blue
           docker rename blue_old blue
           docker start blue
+        fi
+
+    - name: Remove old container
+      run: |
+        # Verwijder de oude container na rollback
+        OLD_CONTAINER=$(docker ps -a --filter "name=blue_old" --format "{{.Names}}")
+        if [ -n "$OLD_CONTAINER" ]; then
+          docker rm blue_old
+        else
+          OLD_CONTAINER=$(docker ps -a --filter "name=green_old" --format "{{.Names}}")
+          if [ -n "$OLD_CONTAINER" ]; then
+            docker rm green_old
+          fi
         fi
