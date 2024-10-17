@@ -30,26 +30,31 @@ jobs:
         BLUE_EXISTS=$(docker ps -a --filter "name=blue" --format "{{.Names}}")
         GREEN_EXISTS=$(docker ps -a --filter "name=green" --format "{{.Names}}")
 
-        if [ -z "$BLUE_EXISTS" ] && [ -z "$GREEN_EXISTS" ]; then                          # If neither container exists, deploy blue
+        if [ -z "$BLUE_EXISTS" ] && [ -z "$GREEN_EXISTS" ]; then                    # Als beide containers niet bestaan, deploy blue
           docker run -d -p 8081:80 --name blue stijn0vp/website:latest
-        elif [ -z "$BLUE_EXISTS" ]; then                                                  # If only blue doesn't exist, deploy blue
+        elif [ -z "$BLUE_EXISTS" ]; then                                            # Als blue niet bestaat, deploy blue
           docker run -d -p 8081:80 --name blue stijn0vp/website:latest
-        elif [ -z "$GREEN_EXISTS" ]; then                                                 # If only green doesn't exist, deploy green
+        elif [ -z "$GREEN_EXISTS" ]; then                                           # Als green niet bestaat, deploy green
           docker run -d -p 8082:80 --name green stijn0vp/website:latest
-        else                                                                          # If both containers exist, check which one has been running longer and replace the other
-          BLUE_UPTIME=$(docker inspect -f '{{.State.StartedAt}}' blue)
-          GREEN_UPTIME=$(docker inspect -f '{{.State.StartedAt}}' green)
+        else
+          BLUE_UPTIME=$(docker inspect -f '{{.State.StartedAt}}' blue 2>/dev/null || echo "")
+          GREEN_UPTIME=$(docker inspect -f '{{.State.StartedAt}}' green 2>/dev/null || echo "")
 
-          if [ "$BLUE_UPTIME" \< "$GREEN_UPTIME" ]; then                        # If blue has been running longer, replace blue
-            docker stop blue
-            docker rm blue
-            docker run -d -p 8081:80 --name blue stijn0vp/website:latest
-          else                                                                  # If green has been running longer, replace green
-            docker stop green
-            docker rm green
-            docker run -d -p 8082:80 --name green stijn0vp/website:latest
+          if [ -n "$BLUE_UPTIME" ] && [ -n "$GREEN_UPTIME" ]; then                  # Als beide containers bestaan, bepaal de oudste en hernoem
+            if [ "$BLUE_UPTIME" \< "$GREEN_UPTIME" ]; then
+              docker stop blue || true
+              docker rm blue || true
+              docker run -d -p 8081:80 --name blue stijn0vp/website:latest
+            else
+              docker stop green || true
+              docker rm green || true
+              docker run -d -p 8082:80 --name green stijn0vp/website:latest
+            fi
+          else
+            echo "Error: One of the containers could not be inspected"
           fi
         fi
+
 
   approval:
     runs-on: ubuntu-latest
