@@ -24,28 +24,28 @@ jobs:
 
     - name: Deploy container
       run: |
+        docker pull stijn0vp/website:latest
+        
         # Check if both containers exist
         BLUE_EXISTS=$(docker ps -a --filter "name=blue" --format "{{.Names}}")
         GREEN_EXISTS=$(docker ps -a --filter "name=green" --format "{{.Names}}")
 
         if [ -z "$BLUE_EXISTS" ] && [ -z "$GREEN_EXISTS" ]; then                    # Als beide containers niet bestaan, deploy blue
           docker run -d -p 8081:80 --name blue stijn0vp/website:latest
-        elif [ -z "$BLUE_EXISTS" ]; then                                            # Als blue niet bestaat, deploy blue en bewaar green
-          docker rename green green_old
+        elif [ -z "$BLUE_EXISTS" ]; then                                            # Als blue niet bestaat, deploy blue
           docker run -d -p 8081:80 --name blue stijn0vp/website:latest
-        elif [ -z "$GREEN_EXISTS" ]; then                                           # Als green niet bestaat, deploy green en bewaar blue
-          docker rename blue blue_old
+        elif [ -z "$GREEN_EXISTS" ]; then                                           # Als green niet bestaat, deploy green
           docker run -d -p 8082:80 --name green stijn0vp/website:latest
         else
-          BLUE_UPTIME=$(docker inspect -f '{{.State.StartedAt}}' blue)
+          BLUE_UPTIME=$(docker inspect -f '{{.State.StartedAt}}' blue)              # Als beide containers bestaan, bepaal de oudste en hernoem
           GREEN_UPTIME=$(docker inspect -f '{{.State.StartedAt}}' green)
           if [ "$BLUE_UPTIME" \< "$GREEN_UPTIME" ]; then
             docker stop blue
-            docker rename blue blue_old                                           # Bewaar de oude container
+            docker rename blue blue_old                                             # Hernoem in plaats van verwijderen
             docker run -d -p 8081:80 --name blue stijn0vp/website:latest
           else
             docker stop green
-            docker rename green green_old                                         # Bewaar de oude container
+            docker rename green green_old                                           # Hernoem in plaats van verwijderen
             docker run -d -p 8082:80 --name green stijn0vp/website:latest
           fi
         fi
@@ -55,7 +55,7 @@ jobs:
     needs: build
 
     steps:
-    - name: Manual approval                              # Voeg een goedkeuring toe voordat de volgende jobs worden uitgevoerd                     
+    - name: Manual approval
       uses: trstringer/manual-approval@v1
       with:
         secret: ${{ github.TOKEN }}
@@ -64,7 +64,7 @@ jobs:
   update-haproxy:
     runs-on: [self-hosted, haproxy-server]
     needs: approval
-    if: success()                                       # Voer deze job alleen uit als de goedkeuring is gegeven
+    if: success()
 
     steps:
     - name: Switch proxy
@@ -75,15 +75,14 @@ jobs:
 
     - name: Remove old container
       run: |
-        # Verwijder de oude container na succesvolle switch
-        OLD_CONTAINER=$(docker ps -a --filter "name=blue_old" --format "{{.Names}}")
-        if [ -n "$OLD_CONTAINER" ]; then
+        # Check if old container exists and remove it
+        BLUE_OLD_EXISTS=$(docker ps -a --filter "name=blue_old" --format "{{.Names}}")
+        GREEN_OLD_EXISTS=$(docker ps -a --filter "name=green_old" --format "{{.Names}}")
+
+        if [ -n "$BLUE_OLD_EXISTS" ]; then
           docker rm blue_old
-        else
-          OLD_CONTAINER=$(docker ps -a --filter "name=green_old" --format "{{.Names}}")
-          if [ -n "$OLD_CONTAINER" ]; then
-            docker rm green_old
-          fi
+        elif [ -n "$GREEN_OLD_EXISTS" ]; then
+          docker rm green_old
         fi
 
   rollback:
@@ -94,29 +93,18 @@ jobs:
     steps:
     - name: Rollback deployment
       run: |
-        # Stop de nieuwe container en herstart de oude
-        NEW_CONTAINER=$(docker ps --filter "name=blue" --format "{{.Names}}")
-        if [ -z "$NEW_CONTAINER" ]; then
-          docker stop green
-          docker rm green
-          docker rename green_old green
-          docker start green
-        else
+        # Check which container was running before the new deployment
+        BLUE_OLD_EXISTS=$(docker ps -a --filter "name=blue_old" --format "{{.Names}}")
+        GREEN_OLD_EXISTS=$(docker ps -a --filter "name=green_old" --format "{{.Names}}")
+
+        if [ -n "$BLUE_OLD_EXISTS" ]; then
           docker stop blue
           docker rm blue
-          docker rename blue_old blue
+          docker rename blue_old blue                                               # Herstel blue_old naar blue
           docker start blue
-        fi
-
-    - name: Remove old container
-      run: |
-        # Verwijder de oude container na rollback
-        OLD_CONTAINER=$(docker ps -a --filter "name=blue_old" --format "{{.Names}}")
-        if [ -n "$OLD_CONTAINER" ]; then
-          docker rm blue_old
-        else
-          OLD_CONTAINER=$(docker ps -a --filter "name=green_old" --format "{{.Names}}")
-          if [ -n "$OLD_CONTAINER" ]; then
-            docker rm green_old
-          fi
+        elif [ -n "$GREEN_OLD_EXISTS" ]; then
+          docker stop green
+          docker rm green
+          docker rename green_old green                                             # Herstel green_old naar green
+          docker start green
         fi
