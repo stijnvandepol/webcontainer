@@ -83,7 +83,7 @@ jobs:
   rollback:
     runs-on: [self-hosted, docker-server]
     needs: approval
-    if: ${{ github.event.review.state == 'changes_requested' }}  # Voer deze job alleen uit als de goedkeuring wordt geweigerd
+    if: ${{ needs.approval.outputs.approval_result == 'denied' }}  # Voer deze job alleen uit als de goedkeuring wordt geweigerd
 
     steps:
     - name: Rollback deployment
