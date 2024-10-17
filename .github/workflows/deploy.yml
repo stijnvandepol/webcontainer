@@ -19,7 +19,7 @@ jobs:
     - name: Build the Docker image
       run: docker build -t stijn0vp/website:latest .
 
-    - name: Push Docker image to Docker Hub
+    - name: Push the Docker image to Docker Hub
       run: docker push stijn0vp/website:latest
 
     - name: Deploy container
@@ -55,7 +55,7 @@ jobs:
     needs: build
 
     steps:
-    - name: Manual approval
+    - name: Manual approval                              # Voeg een goedkeuring toe voordat de volgende jobs worden uitgevoerd                     
       uses: trstringer/manual-approval@v1
       with:
         secret: ${{ github.TOKEN }}
@@ -64,6 +64,7 @@ jobs:
   update-haproxy:
     runs-on: [self-hosted, haproxy-server]
     needs: approval
+    if: success()                                       # Voer deze job alleen uit als de goedkeuring is gegeven
 
     steps:
     - name: Switch proxy
@@ -74,8 +75,8 @@ jobs:
 
   rollback:
     runs-on: [self-hosted, docker-server]
-    if: cancelled() || failure()  # Als de goedkeuring wordt geweigerd
-    needs: build
+    needs: approval
+    if: failure()  # Voer deze job alleen uit als de goedkeuring wordt geweigerd
 
     steps:
     - name: Rollback deployment
