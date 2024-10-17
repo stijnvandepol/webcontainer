@@ -70,7 +70,7 @@ jobs:
     - name: Switch proxy
       run: |
         echo "Running switchconfig.sh..."
-        bash /home/student/switchconfig.sh 2>&1
+        echo "${{ secrets.SUDO_PASSWORD }}" | sudo -S bash /home/student/switchconfig.sh 2>&1
         echo "switchconfig.sh executed successfully."
 
     - name: Remove old container
