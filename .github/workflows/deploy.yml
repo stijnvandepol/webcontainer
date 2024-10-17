@@ -43,12 +43,18 @@ jobs:
           if [ -n "$BLUE_UPTIME" ] && [ -n "$GREEN_UPTIME" ]; then                  # Als beide containers bestaan, bepaal de oudste en hernoem
             if [ "$BLUE_UPTIME" \< "$GREEN_UPTIME" ]; then
               docker stop blue || true
-              docker rm blue || true
-              docker run -d -p 8081:80 --name blue stijn0vp/website:latest
+              docker rename blue blue_old || true                                   # Hernoem de oude container naar blue_old
+              docker commit blue_old blue_old_image || true                         # Maak een nieuwe image van de oude container
+              docker rm blue || true                                                # Verwijder de originele container
+              docker run -d -p 8083:80 --name blue_old blue_old_image || true       # Start de oude container op poort 8083
+              docker run -d -p 8081:80 --name blue stijn0vp/website:latest          # Start de nieuwe container op poort 8081
             else
               docker stop green || true
-              docker rm green || true
-              docker run -d -p 8082:80 --name green stijn0vp/website:latest
+              docker rename green green_old || true                                 # Hernoem de oude container naar green_old
+              docker commit green_old green_old_image || true                       # Maak een nieuwe image van de oude container
+              docker rm green || true                                               # Verwijder de originele container
+              docker run -d -p 8083:80 --name green_old green_old_image || true     # Start de oude container op poort 8083
+              docker run -d -p 8082:80 --name green stijn0vp/website:latest         # Start de nieuwe container op poort 8082
             fi
           else
             echo "Error: One of the containers could not be inspected"
@@ -119,4 +125,3 @@ jobs:
           docker rename green_old green
           docker start green
         fi
-
