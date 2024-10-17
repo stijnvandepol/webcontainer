@@ -7,21 +7,27 @@ on:
 
 jobs:
   build:
+    # Gebruik een zelf-gehoste runner met het label 'docker-server'
     runs-on: [self-hosted, docker-server]
 
     steps:
+    # Stap 1: Checkout de code
     - name: Checkout repository
       uses: actions/checkout@v3
 
+    # Stap 2: Log in op Docker Hub met bestaande secrets
     - name: Log in to Docker Hub
       run: echo "${{ secrets.docker_password }}" | docker login -u "${{ secrets.docker_username }}" --password-stdin
 
+    # Stap 3: Bouw de Docker-container
     - name: Build the Docker image
       run: docker build -t stijn0vp/website:latest .
 
-    - name: Push the Docker image to Docker Hub
+    # Stap 4: Push de Docker-image naar Docker Hub
+    - name: Push Docker image to Docker Hub
       run: docker push stijn0vp/website:latest
 
+    # Stap 5: Run de Docker-container op de runner met label 'docker-server'
     - name: Deploy container
       run: |
         docker pull stijn0vp/website:latest
@@ -30,43 +36,32 @@ jobs:
         BLUE_EXISTS=$(docker ps -a --filter "name=blue" --format "{{.Names}}")
         GREEN_EXISTS=$(docker ps -a --filter "name=green" --format "{{.Names}}")
 
-        if [ -z "$BLUE_EXISTS" ] && [ -z "$GREEN_EXISTS" ]; then                    # Als beide containers niet bestaan, deploy blue
+        if [ -z "$BLUE_EXISTS" ] && [ -z "$GREEN_EXISTS" ]; then                    #Als beide containers niet bestaan, deploy blue
           docker run -d -p 8081:80 --name blue stijn0vp/website:latest
-        elif [ -z "$BLUE_EXISTS" ]; then                                            # Als blue niet bestaat, deploy blue
+        elif [ -z "$BLUE_EXISTS" ]; then                                            #Als blue niet bestaat, deploy blue
           docker run -d -p 8081:80 --name blue stijn0vp/website:latest
-        elif [ -z "$GREEN_EXISTS" ]; then                                           # Als green niet bestaat, deploy green
+        elif [ -z "$GREEN_EXISTS" ]; then                                           #Als green niet bestaat, deploy green
           docker run -d -p 8082:80 --name green stijn0vp/website:latest
         else
-          BLUE_UPTIME=$(docker inspect -f '{{.State.StartedAt}}' blue 2>/dev/null || echo "")
-          GREEN_UPTIME=$(docker inspect -f '{{.State.StartedAt}}' green 2>/dev/null || echo "")
-
-          if [ -n "$BLUE_UPTIME" ] && [ -n "$GREEN_UPTIME" ]; then                  # Als beide containers bestaan, bepaal de oudste en hernoem
-            if [ "$BLUE_UPTIME" \< "$GREEN_UPTIME" ]; then
-              docker stop blue || true
-              docker rename blue blue_old || true                                   # Hernoem de oude container naar blue_old
-              docker commit blue_old blue_old_image || true                         # Maak een nieuwe image van de oude container
-              docker rm blue || true                                                # Verwijder de originele container
-              docker run -d -p 8083:80 --name blue_old blue_old_image || true       # Start de oude container op poort 8083
-              docker run -d -p 8081:80 --name blue stijn0vp/website:latest          # Start de nieuwe container op poort 8081
-            else
-              docker stop green || true
-              docker rename green green_old || true                                 # Hernoem de oude container naar green_old
-              docker commit green_old green_old_image || true                       # Maak een nieuwe image van de oude container
-              docker rm green || true                                               # Verwijder de originele container
-              docker run -d -p 8083:80 --name green_old green_old_image || true     # Start de oude container op poort 8083
-              docker run -d -p 8082:80 --name green stijn0vp/website:latest         # Start de nieuwe container op poort 8082
-            fi
+          BLUE_UPTIME=$(docker inspect -f '{{.State.StartedAt}}' blue)              #Als beide containers bestaan, stop de oudste en deploy de nieuwe
+          GREEN_UPTIME=$(docker inspect -f '{{.State.StartedAt}}' green)
+          if [ "$BLUE_UPTIME" \< "$GREEN_UPTIME" ]; then
+            docker stop blue
+            docker rm blue
+            docker run -d -p 8081:80 --name blue stijn0vp/website:latest
           else
-            echo "Error: One of the containers could not be inspected"
+            docker stop green
+            docker rm green
+            docker run -d -p 8082:80 --name green stijn0vp/website:latest
           fi
         fi
 
-
   approval:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest  # Gebruik een GitHub-hosted runner voor de goedkeuring
     needs: build
 
     steps:
+    # Stap 9: Handmatige goedkeuring vereisen met trstringer/manual-approval
     - name: Manual approval
       uses: trstringer/manual-approval@v1
       with:
@@ -85,23 +80,6 @@ jobs:
         echo "${{ secrets.SUDO_PASSWORD }}" | sudo -S bash /home/student/switchconfig.sh 2>&1
         echo "switchconfig.sh executed successfully."
 
-  remove-old-container:
-    runs-on: [self-hosted, docker-server]
-    needs: update-haproxy  # Deze job draait na het succesvol uitvoeren van update-haproxy
-
-    steps:
-    - name: Remove old container
-      run: |
-        BLUE_OLD_EXISTS=$(docker ps -a --filter "name=blue_old" --format "{{.Names}}")
-        GREEN_OLD_EXISTS=$(docker ps -a --filter "name=green_old" --format "{{.Names}}")
-
-        if [ -n "$BLUE_OLD_EXISTS" ]; then
-          docker rm blue_old || echo "No blue_old container to remove"
-        elif [ -n "$GREEN_OLD_EXISTS" ]; then
-          docker rm green_old || echo "No green_old container to remove"
-        fi
-
-
   rollback:
     runs-on: [self-hosted, docker-server]
     needs: approval
@@ -110,18 +88,32 @@ jobs:
     steps:
     - name: Rollback deployment
       run: |
-        # Check which container was running before the new deployment
-        BLUE_OLD_EXISTS=$(docker ps -a --filter "name=blue_old" --format "{{.Names}}")
-        GREEN_OLD_EXISTS=$(docker ps -a --filter "name=green_old" --format "{{.Names}}")
+        # Inspect both containers to determine the most recent one
+        BLUE_UPTIME=$(docker inspect -f '{{.State.StartedAt}}' blue 2>/dev/null || echo "")
+        GREEN_UPTIME=$(docker inspect -f '{{.State.StartedAt}}' green 2>/dev/null || echo "")
 
-        if [ -n "$BLUE_OLD_EXISTS" ]; then
+        if [ -n "$BLUE_UPTIME" ] && [ -n "$GREEN_UPTIME" ]; then
+          if [ "$BLUE_UPTIME" \> "$GREEN_UPTIME" ]; then
+            # Blue is the most recently created container
+            echo "Stopping and removing the most recent container: blue"
+            docker stop blue || echo "No blue container running"
+            docker rm blue || echo "No blue container to remove"
+          else
+            # Green is the most recently created container
+            echo "Stopping and removing the most recent container: green"
+            docker stop green || echo "No green container running"
+            docker rm green || echo "No green container to remove"
+          fi
+        elif [ -n "$BLUE_UPTIME" ]; then
+          # Only blue exists, so remove it
+          echo "Stopping and removing the container: blue"
           docker stop blue || echo "No blue container running"
           docker rm blue || echo "No blue container to remove"
-          docker rename blue_old blue
-          docker start blue
-        elif [ -n "$GREEN_OLD_EXISTS" ]; then
+        elif [ -n "$GREEN_UPTIME" ]; then
+          # Only green exists, so remove it
+          echo "Stopping and removing the container: green"
           docker stop green || echo "No green container running"
           docker rm green || echo "No green container to remove"
-          docker rename green_old green
-          docker start green
+        else
+          echo "No containers to remove."
         fi
