@@ -41,11 +41,20 @@ jobs:
           docker run -d -p 8082:80 --name green stijn0vp/website:latest
         else
           # If both containers exist, find the one that has been running the longest
-          BLUE_UPTIME=$(docker inspect -f '{{.State.StartedAt}}' blue)
-          GREEN_UPTIME=$(docker inspect -f '{{.State.StartedAt}}' green)
+          if [ -n "$BLUE_EXISTS" ]; then
+            BLUE_UPTIME=$(docker inspect -f '{{.State.StartedAt}}' blue)
+          else
+            BLUE_UPTIME=""
+          fi
 
-          if [ "$BLUE_UPTIME" \< "$GREEN_UPTIME" ]; then
-            # If blue has been running longer, replace blue
+          if [ -n "$GREEN_EXISTS" ]; then
+            GREEN_UPTIME=$(docker inspect -f '{{.State.StartedAt}}' green)
+          else
+            GREEN_UPTIME=""
+          fi
+
+          if [ -z "$BLUE_UPTIME" ] || [ "$BLUE_UPTIME" \< "$GREEN_UPTIME" ]; then
+            # If blue doesn't exist or has been running longer, replace blue
             docker stop blue || true
             docker rm blue || true
             docker run -d -p 8081:80 --name blue stijn0vp/website:latest
@@ -56,6 +65,7 @@ jobs:
             docker run -d -p 8082:80 --name green stijn0vp/website:latest
           fi
         fi
+
 
   approval:
     runs-on: ubuntu-latest
